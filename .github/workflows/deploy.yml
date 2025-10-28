@@ -27,7 +27,7 @@ jobs:
       run: npm run build
       env:
         CI: false
-        REACT_APP_API_URL: https://prophet-forecasting-api.onrender.com
+        REACT_APP_API_URL: https://prophet-forecasting-app-zlfw.onrender.com
 
     - name: Deploy to GitHub Pages
       uses: peaceiris/actions-gh-pages@v3
