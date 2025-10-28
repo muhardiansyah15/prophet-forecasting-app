@@ -94,7 +94,7 @@ app.add_middleware(
         "http://localhost:3000", 
         "http://127.0.0.1:3000",
         "https://muhardiansyah15.github.io",
-        "https://*.up.railway.app",
+        "https://*.onrender.com",
         "https://*.vercel.app",
         "https://*.netlify.app"
     ],

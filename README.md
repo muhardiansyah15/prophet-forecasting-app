@@ -5,7 +5,7 @@ A full-stack web application for time series forecasting using Facebook Prophet.
 ![Prophet Forecasting App](https://img.shields.io/badge/Tech-React%20%2B%20FastAPI%20%2B%20Prophet-blue)
 
 **🚀 Live Demo**: https://muhardiansyah15.github.io/prophet-forecasting-app  
-**📊 API**: https://prophet-forecasting-api.up.railway.app
+**📊 API**: https://prophet-forecasting-api.onrender.com
 
 **Created by Muhardiansyah** - Data Science & Forecasting Tool
 
