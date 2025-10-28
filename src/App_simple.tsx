@@ -32,9 +32,6 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Use environment variable for API URL
-  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8001';
-
   const handleDataUpload = (data: Array<{ ds: string; y: number }>) => {
     setUploadedData(data);
     setForecastData(null);
@@ -51,7 +48,7 @@ function App() {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/forecast`, {
+      const response = await fetch('http://localhost:8001/api/forecast', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -87,10 +87,17 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Prophet Forecasting API", version="1.0.0")
 
-# Enable CORS for React frontend
+# Enable CORS for React frontend and production deployments
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000", 
+        "http://127.0.0.1:3000",
+        "https://muhardiansyah15.github.io",
+        "https://*.up.railway.app",
+        "https://*.vercel.app",
+        "https://*.netlify.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -35,10 +35,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataUpload }) => {
 
       setUploadStatus('Uploading and processing...');
 
-      // Use environment variable for API URL
-      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8001';
-
-      const response = await fetch(`${API_BASE_URL}/api/upload`, {
+      const response = await fetch('http://localhost:8001/api/upload', {
         method: 'POST',
         body: formData,
       });
