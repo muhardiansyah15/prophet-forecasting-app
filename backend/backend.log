@@ -1,0 +1,21 @@
+nohup: ignoring input
+Importing plotly failed. Interactive plots will not work.
+INFO:     Started server process [1202297]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+🚀 Starting Prophet Forecasting API...
+📍 Server will be available at: http://localhost:8001
+📖 API documentation at: http://localhost:8001/docs
+INFO:     127.0.0.1:37974 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37974 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:__main__:Starting forecast with 200 data points
+ERROR:__main__:Error generating forecast: 'Prophet' object has no attribute 'stan_backend'
+INFO:     127.0.0.1:35678 - "POST /api/forecast HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:35692 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40410 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40410 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [1202297]
