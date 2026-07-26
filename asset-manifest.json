@@ -1,13 +1,13 @@
 {
   "files": {
     "main.css": "/prophet-forecasting-app/static/css/main.3875fc41.css",
-    "main.js": "/prophet-forecasting-app/static/js/main.cc82737c.js",
+    "main.js": "/prophet-forecasting-app/static/js/main.95253081.js",
     "index.html": "/prophet-forecasting-app/index.html",
     "main.3875fc41.css.map": "/prophet-forecasting-app/static/css/main.3875fc41.css.map",
-    "main.cc82737c.js.map": "/prophet-forecasting-app/static/js/main.cc82737c.js.map"
+    "main.95253081.js.map": "/prophet-forecasting-app/static/js/main.95253081.js.map"
   },
   "entrypoints": [
     "static/css/main.3875fc41.css",
-    "static/js/main.cc82737c.js"
+    "static/js/main.95253081.js"
   ]
 }
