@@ -60,8 +60,11 @@ function App() {
   const [apiUp, setApiUp] = useState<boolean | null>(null);
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/`)
-      .then(r => setApiUp(r.ok))
+    // Hit a JSON endpoint so a static site answering 200 with HTML
+    // doesn't masquerade as a healthy API.
+    fetch(`${API_BASE_URL}/api/prophet_status`)
+      .then(r => (r.ok ? r.json() : Promise.reject()))
+      .then(() => setApiUp(true))
       .catch(() => setApiUp(false));
   }, []);
 
