@@ -1,217 +1,166 @@
 import React, { useState } from 'react';
-import { ForecastConfigType as Config } from '../App';
+import { ForecastConfigType } from '../App';
 
 interface ForecastConfigProps {
-  onForecast: (config: Config) => void;
+  onForecast: (config: ForecastConfigType) => void;
   loading: boolean;
 }
 
+const METHODS = [
+  {
+    value: 'prophet',
+    name: 'Facebook Prophet',
+    desc: 'Trend + seasonality + holidays, with uncertainty intervals',
+    badge: 'Recommended',
+  },
+  { value: 'linear_trend', name: 'Linear Trend', desc: 'Straight-line fit, fast baseline' },
+  { value: 'moving_average', name: 'Moving Average', desc: '7-day window with weekday pattern' },
+  { value: 'exponential_smoothing', name: 'Exponential Smoothing', desc: 'Weighted recent history' },
+];
+
+const HOLIDAY_COUNTRIES = [
+  { code: '', label: 'None' },
+  { code: 'ID', label: 'Indonesia' },
+  { code: 'US', label: 'United States' },
+  { code: 'GB', label: 'United Kingdom' },
+  { code: 'SG', label: 'Singapore' },
+  { code: 'MY', label: 'Malaysia' },
+  { code: 'JP', label: 'Japan' },
+  { code: 'DE', label: 'Germany' },
+];
+
 const ForecastConfig: React.FC<ForecastConfigProps> = ({ onForecast, loading }) => {
-  const [config, setConfig] = useState<Config>({
-    periods: 30,
-    yearly_seasonality: true,
-    weekly_seasonality: true,
-    daily_seasonality: false,
-    changepoint_prior_scale: 0.05,
-    seasonality_prior_scale: 10.0,
-    holidays_prior_scale: 10.0,
-    country_holidays: 'US',
-    forecast_method: 'linear_trend',
-  });
+  const [method, setMethod] = useState('prophet');
+  const [periods, setPeriods] = useState(30);
+  const [yearly, setYearly] = useState(true);
+  const [weekly, setWeekly] = useState(true);
+  const [daily, setDaily] = useState(false);
+  const [holidays, setHolidays] = useState('');
+  const [changepointScale, setChangepointScale] = useState(0.05);
+  const [seasonalityScale, setSeasonalityScale] = useState(10);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onForecast(config);
-  };
+  const isProphet = method === 'prophet';
 
-  const updateConfig = (key: keyof Config, value: any) => {
-    setConfig(prev => {
-      // Validate numeric fields to avoid NaN being stored in state
-      if (key === 'periods') {
-        const v = parseInt(value as any);
-        if (isNaN(v) || v < 1) return prev;
-        return { ...prev, [key]: v } as Config;
-      }
-
-      if (key === 'changepoint_prior_scale' || key === 'seasonality_prior_scale' || key === 'holidays_prior_scale') {
-        const v = parseFloat(value as any);
-        if (isNaN(v)) return prev;
-        return { ...prev, [key]: v } as Config;
-      }
-
-      // For booleans and country_holidays
-      return { ...prev, [key]: value } as Config;
+  const submit = () => {
+    onForecast({
+      periods,
+      yearly_seasonality: yearly,
+      weekly_seasonality: weekly,
+      daily_seasonality: daily,
+      changepoint_prior_scale: changepointScale,
+      seasonality_prior_scale: seasonalityScale,
+      holidays_prior_scale: 10,
+      country_holidays: holidays || undefined,
+      forecast_method: method,
     });
   };
 
   return (
-    <form onSubmit={handleSubmit}>
-      <div className="config-grid">
-        <div className="form-group">
-          <label htmlFor="periods">
-            <span className="form-icon">📅</span>
-            Forecast Periods
-          </label>
-          <input
-            type="number"
-            id="periods"
-            min="1"
-            max="365"
-            value={config.periods}
-            onChange={(e) => updateConfig('periods', parseInt(e.target.value))}
-            required
-          />
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="country_holidays">
-            <span className="form-icon">🌍</span>
-            Country Holidays
-          </label>
-          <select
-            id="country_holidays"
-            value={config.country_holidays || ''}
-            onChange={(e) => updateConfig('country_holidays', e.target.value || undefined)}
+    <div>
+      <div className="method-row" role="radiogroup" aria-label="Forecast method">
+        {METHODS.map(m => (
+          <button
+            key={m.value}
+            type="button"
+            role="radio"
+            aria-checked={method === m.value}
+            className={`method-card${method === m.value ? ' selected' : ''}`}
+            onClick={() => setMethod(m.value)}
           >
-            <option value="">None</option>
-            <option value="US">United States</option>
-            <option value="UK">United Kingdom</option>
-            <option value="DE">Germany</option>
-            <option value="FR">France</option>
-            <option value="IT">Italy</option>
-            <option value="ES">Spain</option>
-            <option value="CA">Canada</option>
-            <option value="AU">Australia</option>
-            <option value="JP">Japan</option>
-            <option value="CN">China</option>
-            <option value="IN">India</option>
-            <option value="BR">Brazil</option>
-          </select>
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="forecast_method">
-            <span className="form-icon">📈</span>
-            Forecasting Method
-          </label>
-          <select
-            id="forecast_method"
-            value={config.forecast_method}
-            onChange={(e) => updateConfig('forecast_method', e.target.value)}
-          >
-            <option value="linear_trend">Linear Trend (Recommended)</option>
-            <option value="moving_average">Moving Average</option>
-            <option value="exponential_smoothing">Exponential Smoothing</option>
-            <option value="prophet">Facebook Prophet (Requires Setup)</option>
-          </select>
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="changepoint_prior_scale">
-            <span className="form-icon">📊</span>
-            Trend Flexibility
-          </label>
-          <input
-            type="number"
-            id="changepoint_prior_scale"
-            min="0.001"
-            max="0.5"
-            step="any"
-            value={config.changepoint_prior_scale}
-            onChange={(e) => updateConfig('changepoint_prior_scale', parseFloat(e.target.value))}
-            title="Higher values make the trend more flexible (0.001-0.5)"
-          />
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="seasonality_prior_scale">
-            <span className="form-icon">⚡</span>
-            Seasonality Strength
-          </label>
-          <input
-            type="number"
-            id="seasonality_prior_scale"
-            min="0.01"
-            max="50"
-            step="any"
-            value={config.seasonality_prior_scale}
-            onChange={(e) => updateConfig('seasonality_prior_scale', parseFloat(e.target.value))}
-            title="Higher values make seasonality more flexible (0.01-50)"
-          />
-        </div>
+            {m.badge && <span className="m-badge">{m.badge}</span>}
+            <span className="m-name">{m.name}</span>
+            <span className="m-desc">{m.desc}</span>
+          </button>
+        ))}
       </div>
 
-      <div className="config-grid" style={{ marginTop: '20px' }}>
-        <div className="form-group">
-          <label>
+      <div className="form-grid">
+        <div className="field">
+          <label htmlFor="periods">Forecast horizon</label>
+          <div className="range-wrap">
             <input
-              type="checkbox"
-              checked={config.yearly_seasonality}
-              onChange={(e) => updateConfig('yearly_seasonality', e.target.checked)}
-              style={{ marginRight: '8px' }}
+              id="periods"
+              type="range"
+              min={7}
+              max={365}
+              value={periods}
+              onChange={e => setPeriods(Number(e.target.value))}
             />
-            Yearly Seasonality
-          </label>
+            <span className="range-value">{periods} days</span>
+          </div>
         </div>
 
-        <div className="form-group">
-          <label>
-            <input
-              type="checkbox"
-              checked={config.weekly_seasonality}
-              onChange={(e) => updateConfig('weekly_seasonality', e.target.checked)}
-              style={{ marginRight: '8px' }}
-            />
-            Weekly Seasonality
-          </label>
-        </div>
-
-        <div className="form-group">
-          <label>
-            <input
-              type="checkbox"
-              checked={config.daily_seasonality}
-              onChange={(e) => updateConfig('daily_seasonality', e.target.checked)}
-              style={{ marginRight: '8px' }}
-            />
-            Daily Seasonality
-          </label>
-        </div>
-      </div>
-
-      <button
-        type="submit"
-        className="btn"
-        disabled={loading}
-        style={{ marginTop: '20px' }}
-      >
-        {loading ? (
-          <>
-            <span className="btn-icon spinning">📈</span>
-            Generating Forecast...
-          </>
-        ) : (
-          <>
-            <span className="btn-icon">▶️</span>
-            Generate Forecast
-          </>
+        {isProphet && (
+          <div className="field">
+            <label htmlFor="holidays">Country holidays</label>
+            <select id="holidays" value={holidays} onChange={e => setHolidays(e.target.value)}>
+              {HOLIDAY_COUNTRIES.map(c => (
+                <option key={c.code} value={c.code}>{c.label}</option>
+              ))}
+            </select>
+          </div>
         )}
-      </button>
-
-      <div style={{ marginTop: '20px', fontSize: '14px', color: '#666' }} className="parameter-guide">
-        <div className="guide-header">
-          <span className="guide-icon">ℹ️</span>
-          <h4>Parameter Guide:</h4>
-        </div>
-        <ul>
-          <li><strong>Forecast Periods:</strong> Number of future time periods to predict</li>
-          <li><strong>Trend Flexibility:</strong> How much the trend can change (lower = smoother)</li>
-          <li><strong>Seasonality Strength:</strong> How strong seasonal patterns are</li>
-          <li><strong>Seasonality Options:</strong> Enable yearly, weekly, or daily patterns</li>
-          <li><strong>Country Holidays:</strong> Include country-specific holidays in the model</li>
-        </ul>
       </div>
-    </form>
+
+      {isProphet && (
+        <>
+          <div className="toggles">
+            <label className={`toggle${yearly ? ' on' : ''}`}>
+              <input type="checkbox" checked={yearly} onChange={e => setYearly(e.target.checked)} />
+              Yearly seasonality
+            </label>
+            <label className={`toggle${weekly ? ' on' : ''}`}>
+              <input type="checkbox" checked={weekly} onChange={e => setWeekly(e.target.checked)} />
+              Weekly seasonality
+            </label>
+            <label className={`toggle${daily ? ' on' : ''}`}>
+              <input type="checkbox" checked={daily} onChange={e => setDaily(e.target.checked)} />
+              Daily seasonality
+            </label>
+          </div>
+
+          <details className="advanced">
+            <summary>Advanced (Prophet priors)</summary>
+            <div className="form-grid">
+              <div className="field">
+                <label htmlFor="cps">
+                  Changepoint prior scale — trend flexibility (default 0.05)
+                </label>
+                <input
+                  id="cps"
+                  type="number"
+                  step={0.01}
+                  min={0.001}
+                  max={0.5}
+                  value={changepointScale}
+                  onChange={e => setChangepointScale(Number(e.target.value))}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="sps">
+                  Seasonality prior scale — seasonality strength (default 10)
+                </label>
+                <input
+                  id="sps"
+                  type="number"
+                  step={1}
+                  min={0.01}
+                  max={100}
+                  value={seasonalityScale}
+                  onChange={e => setSeasonalityScale(Number(e.target.value))}
+                />
+              </div>
+            </div>
+          </details>
+        </>
+      )}
+
+      <div className="actions">
+        <button className="btn btn-primary" onClick={submit} disabled={loading}>
+          {loading ? 'Forecasting…' : '⚡ Generate Forecast'}
+        </button>
+      </div>
+    </div>
   );
 };
 

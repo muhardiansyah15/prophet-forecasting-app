@@ -1,17 +1,26 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import FileUpload from './components/FileUpload';
 import ForecastConfig from './components/ForecastConfig';
+import StatTiles from './components/StatTiles';
 import ForecastChart from './components/ForecastChart';
-import DataPreview from './components/DataPreview';
+import ComponentsCharts from './components/ComponentsCharts';
+import ForecastTable from './components/ForecastTable';
+
+export interface DataPoint { ds: string; y: number; }
+export interface ForecastPoint { ds: string; yhat: number; yhat_lower: number; yhat_upper: number; }
 
 export interface ForecastData {
-  historical: Array<{ ds: string; y: number }>;
-  forecast: Array<{ ds: string; yhat: number; yhat_lower: number; yhat_upper: number }>;
-  metrics?: {
-    mae: number;
-    rmse: number;
-    mape: number;
+  historical: DataPoint[];
+  fitted: ForecastPoint[];
+  forecast: ForecastPoint[];
+  metrics?: { mae: number; rmse: number; mape: number };
+  components?: {
+    trend: Array<{ ds: string; value: number }>;
+    weekly: Array<{ label: string; value: number }>;
+    yearly: Array<{ label: string; value: number }>;
   };
+  changepoints: string[];
+  method_used: string;
 }
 
 export interface ForecastConfigType {
@@ -26,48 +35,57 @@ export interface ForecastConfigType {
   forecast_method: string;
 }
 
+export const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8001';
+
+function DataSummary({ data }: { data: DataPoint[] }) {
+  const values = data.map(d => d.y);
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const fmt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  return (
+    <div className="chips">
+      <span className="chip"><b>{data.length.toLocaleString()}</b> rows</span>
+      <span className="chip">{data[0].ds} → {data[data.length - 1].ds}</span>
+      <span className="chip">mean <b>{fmt(mean)}</b></span>
+      <span className="chip">min <b>{fmt(Math.min(...values))}</b></span>
+      <span className="chip">max <b>{fmt(Math.max(...values))}</b></span>
+    </div>
+  );
+}
+
 function App() {
-  const [uploadedData, setUploadedData] = useState<Array<{ ds: string; y: number }> | null>(null);
+  const [uploadedData, setUploadedData] = useState<DataPoint[] | null>(null);
   const [forecastData, setForecastData] = useState<ForecastData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [apiUp, setApiUp] = useState<boolean | null>(null);
 
-  // Use environment variable for API URL
-  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8001';
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/`)
+      .then(r => setApiUp(r.ok))
+      .catch(() => setApiUp(false));
+  }, []);
 
-  const handleDataUpload = (data: Array<{ ds: string; y: number }>) => {
+  const handleDataUpload = (data: DataPoint[]) => {
     setUploadedData(data);
     setForecastData(null);
     setError(null);
   };
 
   const handleForecast = async (config: ForecastConfigType) => {
-    if (!uploadedData) {
-      setError('Please upload data first');
-      return;
-    }
-
+    if (!uploadedData) return;
     setLoading(true);
     setError(null);
-
     try {
       const response = await fetch(`${API_BASE_URL}/api/forecast`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          data: uploadedData,
-          config,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: uploadedData, config }),
       });
-
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.detail || 'Failed to generate forecast');
       }
-
-      const result = await response.json();
+      const result: ForecastData = await response.json();
       setForecastData(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unexpected error occurred');
@@ -77,131 +95,98 @@ function App() {
   };
 
   return (
-    <div className="App">
-      {/* Header */}
-      <header className="header">
-        <div className="header-content">
-          <div className="title-section">
-            <div className="app-icon">📈</div>
-            <div>
-              <h1>Prophet Forecasting App</h1>
-              <p>Advanced time series forecasting using Facebook Prophet and alternative methods</p>
-            </div>
+    <div className="app-shell">
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-logo" aria-hidden="true">📈</span>
+          <div>
+            <h1>Prophet Forecast Studio</h1>
+            <p>Upload a time series, get a full forecast dashboard — powered by Facebook Prophet</p>
           </div>
-          
-          <div className="author-credits">
-            <div className="author-info">
-              <span className="author-icon">👨‍💻</span>
-              <span>Built by <strong>Muhardiansyah</strong></span>
-            </div>
-            <div className="social-links">
-              <a href="https://github.com/muhardiansyah15" target="_blank" rel="noopener noreferrer" className="social-link">
-                GitHub
-              </a>
-              <a href="https://linkedin.com/in/muhardiansyah15" target="_blank" rel="noopener noreferrer" className="social-link">
-                LinkedIn
-              </a>
-            </div>
-          </div>
+        </div>
+        <div className="topbar-links">
+          <span className={`api-pill ${apiUp === null ? '' : apiUp ? 'up' : 'down'}`}>
+            <span className="api-dot" />
+            {apiUp === null ? 'checking API…' : apiUp ? 'API online' : 'API offline'}
+          </span>
+          <a href="https://facebook.github.io/prophet/" target="_blank" rel="noopener noreferrer">Prophet Docs</a>
+          <a href="https://github.com/muhardiansyah15/prophet-forecasting-app" target="_blank" rel="noopener noreferrer">GitHub</a>
         </div>
       </header>
 
-      {/* Upload Section */}
-      <div className="upload-section">
-        <div className="section-header">
-          <span className="section-icon">📁</span>
-          <h2>Upload Data</h2>
+      <section className="card">
+        <div className="card-head">
+          <h2><span className="step-num">1</span>Upload your data</h2>
         </div>
+        <p className="card-sub">
+          Excel (.xlsx/.xls) or CSV with a date column and a value column.
+          Columns named <code>ds</code>/<code>y</code> (Prophet's convention) are used directly;
+          otherwise they are auto-detected.
+        </p>
         <FileUpload onDataUpload={handleDataUpload} />
-      </div>
-
-      {/* Data Preview */}
-      {uploadedData && (
-        <div className="config-section">
-          <div className="section-header">
-            <span className="section-icon">📊</span>
-            <h2>Data Preview</h2>
+        {uploadedData && (
+          <div style={{ marginTop: 14 }}>
+            <DataSummary data={uploadedData} />
           </div>
-          <DataPreview data={uploadedData.slice(0, 10)} />
-        </div>
-      )}
+        )}
+      </section>
 
-      {/* Configuration */}
       {uploadedData && (
-        <div className="config-section">
-          <div className="section-header">
-            <span className="section-icon">⚙️</span>
-            <h2>Forecast Configuration</h2>
+        <section className="card">
+          <div className="card-head">
+            <h2><span className="step-num">2</span>Configure the forecast</h2>
           </div>
           <ForecastConfig onForecast={handleForecast} loading={loading} />
-        </div>
-      )}
-
-      {/* Error Display */}
-      {error && (
-        <div className="error">
-          <span className="error-icon">⚠️</span>
-          <div>
-            <strong>Error:</strong> {error}
-          </div>
-        </div>
-      )}
-
-      {/* Loading */}
-      {loading && (
-        <div className="loading">
-          <span className="loading-icon spinning">📈</span>
-          <p>Generating forecast... This may take a few moments.</p>
-        </div>
-      )}
-
-      {/* Results */}
-      {forecastData && (
-        <div className="results-section">
-          <div className="section-header">
-            <span className="section-icon">📈</span>
-            <h2>Forecast Results</h2>
-          </div>
-          <ForecastChart data={forecastData} />
-          
-          {forecastData.metrics && (
-            <div className="metrics">
-              <h3>Accuracy Metrics</h3>
-              <div className="metrics-grid">
-                <div className="metric">
-                  <span className="metric-label">MAE</span>
-                  <span className="metric-value">{forecastData.metrics.mae.toFixed(2)}</span>
-                </div>
-                <div className="metric">
-                  <span className="metric-label">RMSE</span>
-                  <span className="metric-value">{forecastData.metrics.rmse.toFixed(2)}</span>
-                </div>
-                <div className="metric">
-                  <span className="metric-label">MAPE</span>
-                  <span className="metric-value">{forecastData.metrics.mape.toFixed(2)}%</span>
-                </div>
-              </div>
+          {loading && (
+            <div className="loading-panel">
+              <span className="spinner" aria-hidden="true" />
+              Fitting the model and generating your forecast…
             </div>
           )}
-        </div>
+          {error && (
+            <div className="alert alert-error" role="alert">
+              <span aria-hidden="true">⚠️</span>
+              <div><strong>Error:</strong> {error}</div>
+            </div>
+          )}
+        </section>
       )}
 
-      {/* Footer */}
+      {forecastData && (
+        <>
+          <StatTiles data={forecastData} />
+
+          <section className="card">
+            <div className="card-head">
+              <h2>Forecast — history, fit &amp; {forecastData.forecast.length} periods ahead</h2>
+            </div>
+            <p className="card-sub">
+              Shaded band is the model's uncertainty interval. Method:{' '}
+              {forecastData.method_used === 'prophet' ? 'Facebook Prophet' : forecastData.method_used.replace('_', ' ')}
+            </p>
+            <div className="chart-box">
+              <ForecastChart data={forecastData} />
+            </div>
+          </section>
+
+          {forecastData.components && forecastData.components.trend.length > 0 && (
+            <div className="components-wrap">
+              <ComponentsCharts components={forecastData.components} changepoints={forecastData.changepoints} />
+            </div>
+          )}
+
+          <section className="card">
+            <div className="card-head">
+              <h2>Forecast table</h2>
+            </div>
+            <ForecastTable forecast={forecastData.forecast} />
+          </section>
+        </>
+      )}
+
       <footer className="footer">
-        <div className="footer-content">
-          <div className="footer-left">
-            <span className="footer-icon">📈</span>
-            <span>Prophet Forecasting App</span>
-          </div>
-          <div className="footer-center">
-            <p>Created with ❤️ by Muhardiansyah using React, FastAPI, and Facebook Prophet</p>
-          </div>
-          <div className="footer-right">
-            <a href="https://github.com/muhardiansyah15/prophet-forecasting-app" target="_blank" rel="noopener noreferrer" className="footer-link">
-              View Source
-            </a>
-          </div>
-        </div>
+        <span>Built by <a href="https://muhardiansyah.netlify.app/" target="_blank" rel="noopener noreferrer">Muhardiansyah</a> · React + FastAPI + Prophet</span>
+        <span><a href="https://facebook.github.io/prophet/docs/quick_start.html" target="_blank" rel="noopener noreferrer">How Prophet works</a></span>
       </footer>
     </div>
   );

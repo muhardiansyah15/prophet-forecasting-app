@@ -1,68 +1,72 @@
 import React, { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { API_BASE_URL, DataPoint } from '../App';
 
 interface FileUploadProps {
-  onDataUpload: (data: Array<{ ds: string; y: number }>) => void;
+  onDataUpload: (data: DataPoint[]) => void;
 }
 
 const FileUpload: React.FC<FileUploadProps> = ({ onDataUpload }) => {
-  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    const file = acceptedFiles[0];
-    if (!file) return;
-
-    // Reset states
+  const uploadFile = useCallback(async (file: File | Blob, filename: string) => {
     setError(null);
-    setUploadStatus(null);
-
-    // Validate file type
-    if (!file.name.endsWith('.xls') && !file.name.endsWith('.xlsx')) {
-      setError('Please upload an Excel file (.xls or .xlsx)');
-      return;
-    }
-
-    // Validate file size (10MB limit)
-    if (file.size > 10 * 1024 * 1024) {
-      setError('File size must be less than 10MB');
-      return;
-    }
-
+    setStatus('Uploading and parsing…');
     try {
       const formData = new FormData();
-      formData.append('file', file);
-
-      setUploadStatus('Uploading and processing...');
-
-      // Use environment variable for API URL
-      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8001';
-
+      formData.append('file', file, filename);
       const response = await fetch(`${API_BASE_URL}/api/upload`, {
         method: 'POST',
         body: formData,
       });
-
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.detail || 'Upload failed');
       }
-
       const result = await response.json();
-      
-      setUploadStatus(`Successfully processed ${result.data.length} data points`);
+      setStatus(`Parsed ${result.data.length.toLocaleString()} data points from ${filename}`);
       onDataUpload(result.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
-      setUploadStatus(null);
+      setStatus(null);
     }
   }, [onDataUpload]);
+
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    const file = acceptedFiles[0];
+    if (!file) return;
+    if (!/\.(xls|xlsx|csv)$/i.test(file.name)) {
+      setError('Please upload an Excel (.xls/.xlsx) or CSV file');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File size must be less than 10MB');
+      return;
+    }
+    uploadFile(file, file.name);
+  }, [uploadFile]);
+
+  const loadSample = async () => {
+    setError(null);
+    setStatus('Loading sample dataset…');
+    try {
+      const res = await fetch(`${process.env.PUBLIC_URL}/samples/sample_sales_data.xlsx`);
+      if (!res.ok) throw new Error('Could not load the sample dataset');
+      const blob = await res.blob();
+      await uploadFile(blob, 'sample_sales_data.xlsx');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load sample');
+      setStatus(null);
+    }
+  };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
       'application/vnd.ms-excel': ['.xls'],
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      'text/csv': ['.csv'],
     },
     multiple: false,
   });
@@ -71,36 +75,26 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataUpload }) => {
     <div className="file-upload">
       <div {...getRootProps()} className={`dropzone ${isDragActive ? 'active' : ''}`}>
         <input {...getInputProps()} />
-        {isDragActive ? (
-          <div className="dropzone-content">
-            <span className="dropzone-icon active">📁</span>
-            <p>Drop the Excel file here...</p>
-          </div>
-        ) : (
-          <div className="dropzone-content">
-            <span className="dropzone-icon">📄</span>
-            <p>Drag & drop an Excel file here, or click to select</p>
-            <p style={{ fontSize: '14px', color: '#666', marginTop: '10px' }}>
-              Supported formats: .xls, .xlsx (max 10MB)
-            </p>
-            <p style={{ fontSize: '12px', color: '#999', marginTop: '5px' }}>
-              Required columns: 'ds' (date) and 'y' (value)
-            </p>
-          </div>
-        )}
+        <div className="dz-icon" aria-hidden="true">{isDragActive ? '📂' : '📄'}</div>
+        <p>{isDragActive ? 'Drop the file here…' : 'Drag & drop a file here, or click to browse'}</p>
+        <p className="dz-hint">.xlsx · .xls · .csv — max 10MB</p>
       </div>
 
-      {uploadStatus && (
-        <div className="success" style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span className="success-icon">✅</span>
-          {uploadStatus}
+      <div className="upload-extra">
+        <span>No data at hand?</span>
+        <button type="button" className="link-btn" onClick={loadSample}>
+          Try the sample sales dataset →
+        </button>
+      </div>
+
+      {status && (
+        <div className="alert alert-ok" role="status">
+          <span aria-hidden="true">✅</span> {status}
         </div>
       )}
-
       {error && (
-        <div className="error" style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span className="error-icon">❌</span>
-          {error}
+        <div className="alert alert-error" role="alert">
+          <span aria-hidden="true">⚠️</span> {error}
         </div>
       )}
     </div>

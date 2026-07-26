@@ -4,108 +4,49 @@ from pydantic import BaseModel
 from typing import List, Optional, Any, Dict
 import pandas as pd
 import numpy as np
-# from prophet import Prophet  # Commented out - using simple forecasting instead
-from simple_forecasting import linear_trend_forecast, moving_average_forecast, exponential_smoothing_forecast
-import os
-from pathlib import Path
-
-# Prophet / CmdStan diagnostic flags (filled by check_prophet_status)
-PROPHET_AVAILABLE = False
-PROPHET_IMPORT_ERROR: Optional[str] = None
-CMDSTAN_INSTALLED = False
-CMDSTAN_PATH: Optional[str] = None
-
-def check_prophet_status() -> Dict[str, Any]:
-    """Check whether Prophet and CmdStan are available and return diagnostics."""
-    global PROPHET_AVAILABLE, PROPHET_IMPORT_ERROR, CMDSTAN_INSTALLED, CMDSTAN_PATH
-    PROPHET_AVAILABLE = False
-    PROPHET_IMPORT_ERROR = None
-    CMDSTAN_INSTALLED = False
-    CMDSTAN_PATH = None
-    diagnostics: Dict[str, Any] = {}
-    
-    try:
-        # Try importing Prophet dynamically
-        from prophet import Prophet  # type: ignore
-        diagnostics['prophet_imported'] = True
-        
-        # Try actually creating a Prophet model to test if stan_backend works
-        test_model = Prophet()
-        # Try to access the stan_backend attribute that typically fails
-        backend = getattr(test_model, 'stan_backend', None)
-        if backend is None:
-            PROPHET_AVAILABLE = False
-            PROPHET_IMPORT_ERROR = "Prophet imported but stan_backend attribute is missing"
-            diagnostics['prophet_functional'] = False
-            diagnostics['prophet_error'] = PROPHET_IMPORT_ERROR
-        else:
-            PROPHET_AVAILABLE = True
-            diagnostics['prophet_functional'] = True
-            
-    except Exception as e:
-        PROPHET_AVAILABLE = False
-        PROPHET_IMPORT_ERROR = str(e)
-        diagnostics['prophet_imported'] = False
-        diagnostics['prophet_functional'] = False
-        diagnostics['prophet_import_error'] = PROPHET_IMPORT_ERROR
-
-    # If cmdstanpy is installed, check whether CmdStan is installed/built
-    try:
-        import cmdstanpy
-        try:
-            # cmdstanpy.cmdstan_path() returns a Path-like string when installed
-            path = cmdstanpy.cmdstan_path()
-            if path and Path(path).exists():
-                CMDSTAN_INSTALLED = True
-                CMDSTAN_PATH = str(path)
-            else:
-                CMDSTAN_INSTALLED = False
-                CMDSTAN_PATH = str(path) if path else None
-        except Exception:
-            # Older cmdstanpy versions may not have cmdstan_path helper
-            CMDSTAN_INSTALLED = False
-            CMDSTAN_PATH = None
-        diagnostics['cmdstanpy_available'] = True
-        diagnostics['cmdstan_installed'] = CMDSTAN_INSTALLED
-        diagnostics['cmdstan_path'] = CMDSTAN_PATH
-    except Exception:
-        diagnostics['cmdstanpy_available'] = False
-        diagnostics['cmdstan_installed'] = False
-
-    return diagnostics
-
-# Run diagnostic on import/startup
-PROPHET_DIAGNOSTICS = check_prophet_status()
 import io
-import json
-from datetime import datetime
 import logging
 
-# Configure logging
+from simple_forecasting import (
+    linear_trend_forecast,
+    moving_average_forecast,
+    exponential_smoothing_forecast,
+)
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Prophet Forecasting API", version="1.0.0")
+# ---------------------------------------------------------------------------
+# Prophet availability (import once; wheels since prophet 1.1 bundle cmdstan,
+# so no separate CmdStan install step is needed)
+# ---------------------------------------------------------------------------
+try:
+    from prophet import Prophet  # type: ignore
 
-# Enable CORS for React frontend and production deployments
+    PROPHET_AVAILABLE = True
+    PROPHET_IMPORT_ERROR: Optional[str] = None
+except Exception as e:  # pragma: no cover
+    Prophet = None  # type: ignore
+    PROPHET_AVAILABLE = False
+    PROPHET_IMPORT_ERROR = str(e)
+
+app = FastAPI(title="Prophet Forecasting API", version="2.0.0")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000", 
-        "http://127.0.0.1:3000",
-        "https://muhardiansyah15.github.io",
-        "https://*.onrender.com",
-        "https://*.vercel.app",
-        "https://*.netlify.app"
-    ],
+    allow_origin_regex=r"https://.*\.(onrender\.com|vercel\.app|netlify\.app)|https://muhardiansyah15\.github\.io|http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ---------------------------------------------------------------------------
+# Schemas
+# ---------------------------------------------------------------------------
 class DataPoint(BaseModel):
     ds: str
     y: float
+
 
 class ForecastConfig(BaseModel):
     periods: int = 30
@@ -116,11 +57,13 @@ class ForecastConfig(BaseModel):
     seasonality_prior_scale: float = 10.0
     holidays_prior_scale: float = 10.0
     country_holidays: Optional[str] = None
-    forecast_method: str = "linear_trend"  # New: linear_trend, moving_average, exponential_smoothing
+    forecast_method: str = "prophet"  # prophet | linear_trend | moving_average | exponential_smoothing
+
 
 class ForecastRequest(BaseModel):
     data: List[DataPoint]
     config: ForecastConfig
+
 
 class ForecastPoint(BaseModel):
     ds: str
@@ -128,264 +71,313 @@ class ForecastPoint(BaseModel):
     yhat_lower: float
     yhat_upper: float
 
+
 class ForecastMetrics(BaseModel):
     mae: float
     rmse: float
     mape: float
 
+
+class TrendPoint(BaseModel):
+    ds: str
+    value: float
+
+
+class NamedValue(BaseModel):
+    label: str
+    value: float
+
+
+class ForecastComponents(BaseModel):
+    trend: List[TrendPoint] = []
+    weekly: List[NamedValue] = []      # effect per day of week (Mon..Sun)
+    yearly: List[NamedValue] = []      # average effect per month (Jan..Dec)
+
+
 class ForecastResponse(BaseModel):
     historical: List[DataPoint]
-    forecast: List[ForecastPoint]
+    fitted: List[ForecastPoint]        # in-sample fit over the historical range
+    forecast: List[ForecastPoint]      # future periods only
     metrics: Optional[ForecastMetrics] = None
+    components: Optional[ForecastComponents] = None
+    changepoints: List[str] = []
+    method_used: str = "prophet"
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 def calculate_metrics(actual: np.ndarray, predicted: np.ndarray) -> ForecastMetrics:
-    """Calculate forecast accuracy metrics"""
-    mae = np.mean(np.abs(actual - predicted))
-    rmse = np.sqrt(np.mean((actual - predicted) ** 2))
-    
-    # Calculate MAPE, avoid division by zero
+    mae = float(np.mean(np.abs(actual - predicted)))
+    rmse = float(np.sqrt(np.mean((actual - predicted) ** 2)))
     mape_values = np.abs((actual - predicted) / np.where(actual != 0, actual, 1))
-    mape = np.mean(mape_values) * 100
-    
+    mape = float(np.mean(mape_values) * 100)
     return ForecastMetrics(mae=mae, rmse=rmse, mape=mape)
 
-def parse_excel_file(file_content: bytes) -> List[DataPoint]:
-    """Parse Excel file and return data points"""
-    try:
-        # Try reading as Excel file
-        df = pd.read_excel(io.BytesIO(file_content))
-        
-        # Check if required columns exist
-        if 'ds' not in df.columns or 'y' not in df.columns:
-            raise ValueError("Excel file must contain 'ds' (date) and 'y' (value) columns")
-        
-        # Convert ds column to datetime if it's not already
-        if not pd.api.types.is_datetime64_any_dtype(df['ds']):
-            df['ds'] = pd.to_datetime(df['ds'])
-        
-        # Format ds column as string in YYYY-MM-DD format
-        df['ds'] = df['ds'].dt.strftime('%Y-%m-%d')
-        
-        # Remove rows with missing values
-        df = df.dropna(subset=['ds', 'y'])
-        
-        # Convert to list of DataPoint objects
-        data_points = []
-        for _, row in df.iterrows():
-            try:
-                data_points.append(DataPoint(ds=row['ds'], y=float(row['y'])))
-            except (ValueError, TypeError) as e:
-                logger.warning(f"Skipping invalid row: {row}. Error: {e}")
-                continue
-        
-        if len(data_points) == 0:
-            raise ValueError("No valid data points found in the file")
-        
-        return data_points
-        
-    except Exception as e:
-        logger.error(f"Error parsing Excel file: {e}")
-        raise ValueError(f"Error parsing Excel file: {str(e)}")
 
+def detect_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Return a dataframe with columns ds (datetime) and y (numeric).
+
+    Accepts the Prophet convention ('ds'/'y') directly; otherwise auto-detects
+    the first date-like column and the first numeric column.
+    """
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    lower_map = {c.lower(): c for c in df.columns}
+
+    ds_col = lower_map.get("ds")
+    y_col = lower_map.get("y")
+
+    if ds_col is None:
+        for c in df.columns:
+            if c == y_col:
+                continue
+            parsed = pd.to_datetime(df[c], errors="coerce")
+            if parsed.notna().mean() > 0.9:
+                ds_col = c
+                break
+    if y_col is None:
+        for c in df.columns:
+            if c == ds_col:
+                continue
+            values = pd.to_numeric(df[c], errors="coerce")
+            if values.notna().mean() > 0.9:
+                y_col = c
+                break
+
+    if ds_col is None or y_col is None:
+        raise ValueError(
+            "Could not find a date column and a numeric column. "
+            "Use Prophet's convention: a 'ds' (date) column and a 'y' (value) column."
+        )
+
+    out = pd.DataFrame(
+        {
+            "ds": pd.to_datetime(df[ds_col], errors="coerce"),
+            "y": pd.to_numeric(df[y_col], errors="coerce"),
+        }
+    ).dropna()
+    out = out.sort_values("ds").reset_index(drop=True)
+    if out.empty:
+        raise ValueError("No valid rows found after parsing dates and values.")
+    return out
+
+
+def parse_uploaded_file(filename: str, content: bytes) -> pd.DataFrame:
+    name = (filename or "").lower()
+    if name.endswith((".xls", ".xlsx")):
+        raw = pd.read_excel(io.BytesIO(content))
+    elif name.endswith(".csv"):
+        raw = pd.read_csv(io.BytesIO(content))
+    else:
+        raise ValueError("File must be .xlsx, .xls, or .csv")
+    return detect_columns(raw)
+
+
+WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def extract_components(model: "Prophet", forecast_df: pd.DataFrame) -> ForecastComponents:
+    """Summarize Prophet's decomposition for the dashboard."""
+    components = ForecastComponents()
+
+    components.trend = [
+        TrendPoint(ds=row["ds"].strftime("%Y-%m-%d"), value=float(row["trend"]))
+        for _, row in forecast_df[["ds", "trend"]].iterrows()
+    ]
+
+    if "weekly" in forecast_df.columns:
+        weekly = forecast_df.groupby(forecast_df["ds"].dt.dayofweek)["weekly"].mean()
+        components.weekly = [
+            NamedValue(label=WEEKDAYS[d], value=float(weekly.get(d, 0.0)))
+            for d in range(7)
+        ]
+
+    if "yearly" in forecast_df.columns:
+        yearly = forecast_df.groupby(forecast_df["ds"].dt.month)["yearly"].mean()
+        components.yearly = [
+            NamedValue(label=MONTHS[m - 1], value=float(yearly.get(m, 0.0)))
+            for m in range(1, 13)
+        ]
+
+    return components
+
+
+def significant_changepoints(model: "Prophet", threshold: float = 0.01) -> List[str]:
+    """Changepoints where the trend actually shifted (|delta| above threshold)."""
+    try:
+        deltas = np.nanmean(model.params["delta"], axis=0)
+        return [
+            cp.strftime("%Y-%m-%d")
+            for cp, delta in zip(model.changepoints, deltas)
+            if abs(delta) >= threshold
+        ]
+    except Exception:
+        return []
+
+
+def build_prophet_model(config: ForecastConfig) -> "Prophet":
+    model = Prophet(
+        yearly_seasonality=config.yearly_seasonality,
+        weekly_seasonality=config.weekly_seasonality,
+        daily_seasonality=config.daily_seasonality,
+        changepoint_prior_scale=config.changepoint_prior_scale,
+        seasonality_prior_scale=config.seasonality_prior_scale,
+        holidays_prior_scale=config.holidays_prior_scale,
+    )
+    if config.country_holidays:
+        try:
+            model.add_country_holidays(country_name=config.country_holidays)
+        except Exception as e:
+            logger.warning(f"Could not add holidays for {config.country_holidays}: {e}")
+    return model
+
+
+def run_simple_method(method: str, df: pd.DataFrame, periods: int) -> pd.DataFrame:
+    if method == "moving_average":
+        return moving_average_forecast(df, periods=periods)
+    if method == "exponential_smoothing":
+        return exponential_smoothing_forecast(df, periods=periods)
+    return linear_trend_forecast(df, periods=periods)
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 @app.get("/")
 async def root():
-    return {"message": "Prophet Forecasting API", "version": "1.0.0"}
+    return {
+        "message": "Prophet Forecasting API",
+        "version": "2.0.0",
+        "prophet_available": PROPHET_AVAILABLE,
+    }
 
 
 @app.get("/api/prophet_status")
 async def prophet_status():
-    """Return diagnostics about Prophet and CmdStan availability."""
-    try:
-        diag = check_prophet_status()
-        return diag
-    except Exception as e:
-        logger.error(f"Error while checking prophet status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "prophet_available": PROPHET_AVAILABLE,
+        "prophet_import_error": PROPHET_IMPORT_ERROR,
+    }
+
 
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
-    """Upload and parse Excel file"""
+    """Upload and parse an Excel/CSV file into (ds, y) data points."""
     try:
-        # Validate file type
-        if not file.filename.endswith(('.xls', '.xlsx')):
-            raise HTTPException(status_code=400, detail="File must be an Excel file (.xls or .xlsx)")
-        
-        # Read file content
         content = await file.read()
-        
-        # Parse Excel file
-        data_points = parse_excel_file(content)
-        
-        logger.info(f"Successfully parsed {len(data_points)} data points from {file.filename}")
-        
+        if len(content) > 10 * 1024 * 1024:
+            raise ValueError("File size must be less than 10MB")
+        df = parse_uploaded_file(file.filename, content)
+        logger.info(f"Parsed {len(df)} rows from {file.filename}")
         return {
-            "message": f"Successfully uploaded and parsed {len(data_points)} data points",
-            "data": [{"ds": dp.ds, "y": dp.y} for dp in data_points]
+            "message": f"Successfully parsed {len(df)} data points",
+            "data": [
+                {"ds": row["ds"].strftime("%Y-%m-%d"), "y": float(row["y"])}
+                for _, row in df.iterrows()
+            ],
         }
-        
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 @app.post("/api/forecast", response_model=ForecastResponse)
 async def generate_forecast(request: ForecastRequest):
-    """Generate forecast using simple forecasting methods"""
     try:
-        # Convert data to DataFrame
         df = pd.DataFrame([{"ds": dp.ds, "y": dp.y} for dp in request.data])
-        
-        # Ensure ds column is datetime
-        df['ds'] = pd.to_datetime(df['ds'])
-        
-        # Sort by date
-        df = df.sort_values('ds').reset_index(drop=True)
-        
-        logger.info(f"Starting forecast with {len(df)} data points, method={request.config.forecast_method}")
+        df["ds"] = pd.to_datetime(df["ds"])
+        df = df.sort_values("ds").reset_index(drop=True)
+        if len(df) < 2:
+            raise HTTPException(status_code=400, detail="Need at least 2 data points")
 
-        # If user explicitly requested Prophet, attempt it and provide actionable errors if it's not ready
-        if request.config.forecast_method == 'prophet':
-            # Re-check Prophet availability at request time
-            diag = check_prophet_status()
-            if not diag.get('prophet_functional', False):
-                error_msg = diag.get('prophet_error', diag.get('prophet_import_error', 'Unknown Prophet error'))
-                msg = (
-                    "Prophet is not functional in the current environment. "
-                    "This typically means CmdStan is not properly installed or configured. "
-                    "Please see backend/PROPHET_SETUP.md for installation instructions. "
-                    f"Error: {error_msg}")
-                logger.error(msg)
-                raise HTTPException(status_code=500, detail=msg)
+        method = request.config.forecast_method
+        logger.info(f"Forecasting {len(df)} points, periods={request.config.periods}, method={method}")
 
-            # If we reach here, try to import Prophet and run forecasting
-            from prophet import Prophet  # type: ignore
+        components: Optional[ForecastComponents] = None
+        changepoints: List[str] = []
 
-            # Initialize Prophet model
-            model = Prophet(
-                yearly_seasonality=request.config.yearly_seasonality,
-                weekly_seasonality=request.config.weekly_seasonality,
-                daily_seasonality=request.config.daily_seasonality,
-                changepoint_prior_scale=request.config.changepoint_prior_scale,
-                seasonality_prior_scale=request.config.seasonality_prior_scale,
-                holidays_prior_scale=request.config.holidays_prior_scale
-            )
-
-            # Add country holidays if specified
-            if request.config.country_holidays:
-                try:
-                    model.add_country_holidays(country_name=request.config.country_holidays)
-                except Exception as e:
-                    logger.warning(f"Could not add holidays for {request.config.country_holidays}: {e}")
-
-            # Fit the model
+        if method == "prophet":
+            if not PROPHET_AVAILABLE:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Prophet is not available on the server: "
+                        f"{PROPHET_IMPORT_ERROR}. Choose another method or reinstall prophet."
+                    ),
+                )
+            model = build_prophet_model(request.config)
             model.fit(df)
-
-            # Create future dataframe
             future = model.make_future_dataframe(periods=request.config.periods)
-
-            # Generate forecast
             forecast_df = model.predict(future)
+            components = extract_components(model, forecast_df)
+            changepoints = significant_changepoints(model)
         else:
-            # Use simple forecasting fallbacks (fast, pure-python)
-            if request.config.forecast_method == 'moving_average':
-                forecast_df = moving_average_forecast(df, periods=request.config.periods)
-            elif request.config.forecast_method == 'exponential_smoothing':
-                forecast_df = exponential_smoothing_forecast(df, periods=request.config.periods)
-            else:
-                # Default to linear trend
-                forecast_df = linear_trend_forecast(df, periods=request.config.periods)
-        
-        # Split historical and forecast data
-        historical_data = df.copy()
-        forecast_data = forecast_df.tail(request.config.periods).copy()
-        
-        # Calculate metrics using cross-validation on historical data
+            forecast_df = run_simple_method(method, df, request.config.periods)
+
+        fitted_df = forecast_df.iloc[: len(df)]
+        future_df = forecast_df.iloc[len(df):]
+
+        # Holdout metrics: refit on the first 80%, score the last 20%
         metrics = None
-        if len(df) > 10:  # Only calculate metrics if we have enough data
+        if len(df) > 10:
             try:
-                # Use the last 20% of data for validation
-                split_point = int(len(df) * 0.8)
-                train_df = df.iloc[:split_point]
-                test_df = df.iloc[split_point:]
-                
-                # Fit model on training data based on the forecast method used
-                if request.config.forecast_method == 'prophet':
-                    # Only use Prophet for metrics calculation if we're using Prophet for forecasting
-                    from prophet import Prophet  # type: ignore
-                    val_model = Prophet(
-                        yearly_seasonality=request.config.yearly_seasonality,
-                        weekly_seasonality=request.config.weekly_seasonality,
-                        daily_seasonality=request.config.daily_seasonality,
-                        changepoint_prior_scale=request.config.changepoint_prior_scale,
-                        seasonality_prior_scale=request.config.seasonality_prior_scale,
-                        holidays_prior_scale=request.config.holidays_prior_scale
-                    )
-                    
-                    if request.config.country_holidays:
-                        try:
-                            val_model.add_country_holidays(country_name=request.config.country_holidays)
-                        except:
-                            pass
-                    
+                split = int(len(df) * 0.8)
+                train_df, test_df = df.iloc[:split], df.iloc[split:]
+                if method == "prophet":
+                    val_model = build_prophet_model(request.config)
                     val_model.fit(train_df)
-                    
-                    # Predict on test data
-                    test_future = val_model.make_future_dataframe(periods=len(test_df))
-                    test_forecast = val_model.predict(test_future)
-                    test_predictions = test_forecast.tail(len(test_df))['yhat'].values
+                    val_future = val_model.make_future_dataframe(periods=len(test_df))
+                    val_pred = val_model.predict(val_future).tail(len(test_df))["yhat"].values
                 else:
-                    # Use the same simple forecasting method for validation
-                    if request.config.forecast_method == 'moving_average':
-                        val_forecast = moving_average_forecast(train_df, periods=len(test_df))
-                    elif request.config.forecast_method == 'exponential_smoothing':
-                        val_forecast = exponential_smoothing_forecast(train_df, periods=len(test_df))
-                    else:
-                        # Default to linear trend
-                        val_forecast = linear_trend_forecast(train_df, periods=len(test_df))
-                    
-                    test_predictions = val_forecast.tail(len(test_df))['yhat'].values
-                
-                # Calculate metrics
-                metrics = calculate_metrics(test_df['y'].values, test_predictions)
-                
+                    val_pred = (
+                        run_simple_method(method, train_df, len(test_df))
+                        .tail(len(test_df))["yhat"]
+                        .values
+                    )
+                metrics = calculate_metrics(test_df["y"].values, val_pred)
             except Exception as e:
                 logger.warning(f"Could not calculate metrics: {e}")
-        
-        # Format response
-        historical = [
-            DataPoint(ds=row['ds'].strftime('%Y-%m-%d'), y=row['y'])
-            for _, row in historical_data.iterrows()
-        ]
-        
-        forecast = [
-            ForecastPoint(
-                ds=row['ds'].strftime('%Y-%m-%d'),
-                yhat=row['yhat'],
-                yhat_lower=row['yhat_lower'],
-                yhat_upper=row['yhat_upper']
-            )
-            for _, row in forecast_data.iterrows()
-        ]
-        
-        logger.info(f"Successfully generated forecast with {len(forecast)} future points")
-        
+
+        def to_points(frame: pd.DataFrame) -> List[ForecastPoint]:
+            return [
+                ForecastPoint(
+                    ds=row["ds"].strftime("%Y-%m-%d"),
+                    yhat=float(row["yhat"]),
+                    yhat_lower=float(row["yhat_lower"]),
+                    yhat_upper=float(row["yhat_upper"]),
+                )
+                for _, row in frame.iterrows()
+            ]
+
         return ForecastResponse(
-            historical=historical,
-            forecast=forecast,
-            metrics=metrics
+            historical=[
+                DataPoint(ds=row["ds"].strftime("%Y-%m-%d"), y=float(row["y"]))
+                for _, row in df.iterrows()
+            ],
+            fitted=to_points(fitted_df),
+            forecast=to_points(future_df),
+            metrics=metrics,
+            components=components,
+            changepoints=changepoints,
+            method_used=method,
         )
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error generating forecast: {e}")
-        # If it's an HTTPException already, re-raise
-        if isinstance(e, HTTPException):
-            raise
         raise HTTPException(status_code=500, detail=f"Error generating forecast: {str(e)}")
+
 
 if __name__ == "__main__":
     import uvicorn
+
     print("🚀 Starting Prophet Forecasting API...")
-    print("📍 Server will be available at: http://localhost:8001")
-    print("📖 API documentation at: http://localhost:8001/docs")
+    print("📍 Server: http://localhost:8001  ·  Docs: http://localhost:8001/docs")
     uvicorn.run(app, host="0.0.0.0", port=8001)
