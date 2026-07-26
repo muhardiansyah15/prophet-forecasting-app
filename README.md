@@ -5,7 +5,7 @@ KPI tiles, an uncertainty-band forecast chart, Prophet's trend/seasonality
 decomposition, and a downloadable forecast table.
 
 - **Frontend:** React + TypeScript + Chart.js — https://muhardiansyah15.github.io/prophet-forecasting-app/
-- **Backend:** FastAPI + [Facebook Prophet](https://facebook.github.io/prophet/) (v1.3) — https://prophet-forecasting-app-zlfw.onrender.com
+- **Backend:** FastAPI + [Facebook Prophet](https://facebook.github.io/prophet/) (v1.3) — https://prophet-forecasting-app-hardi.onrender.com
 
 ## What you get
 
