@@ -188,7 +188,7 @@ function App() {
       )}
 
       <footer className="footer">
-        <span>Built by <a href="https://muhardiansyah.netlify.app/" target="_blank" rel="noopener noreferrer">Muhardiansyah</a> · React + FastAPI + Prophet</span>
+        <span>Built by <a href="https://muhardiansyah15.github.io/" target="_blank" rel="noopener noreferrer">Muhardiansyah</a> · React + FastAPI + Prophet</span>
         <span><a href="https://facebook.github.io/prophet/docs/quick_start.html" target="_blank" rel="noopener noreferrer">How Prophet works</a></span>
       </footer>
     </div>

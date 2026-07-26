@@ -65,4 +65,4 @@ Interactive docs at `/docs` (Swagger UI).
 
 ---
 
-Built by [Muhardiansyah](https://muhardiansyah.netlify.app/).
+Built by [Muhardiansyah](https://muhardiansyah15.github.io/).
