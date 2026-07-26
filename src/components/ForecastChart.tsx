@@ -15,11 +15,11 @@ import { ForecastData } from '../App';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
-const BLUE = '#2a78d6';
-const ORANGE = '#eb6834';
-const BAND = 'rgba(42, 120, 214, 0.12)';
-const GRID = '#e1e0d9';
-const INK_MUTED = '#898781';
+const BLUE = '#3987e5';
+const ORANGE = '#d95926';
+const BAND = 'rgba(57, 135, 229, 0.16)';
+const GRID = '#1b2436';
+const INK_MUTED = '#5f6f8f';
 
 interface ForecastChartProps {
   data: ForecastData;
@@ -97,7 +97,7 @@ const ForecastChart: React.FC<ForecastChartProps> = ({ data }) => {
         labels: {
           usePointStyle: true,
           boxWidth: 8,
-          color: '#52514e',
+          color: '#9fb0cf',
           filter: (item: any) => item.text !== '_lower',
         },
       },

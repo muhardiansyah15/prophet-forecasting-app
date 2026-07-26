@@ -14,9 +14,9 @@ import { ForecastData } from '../App';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend);
 
-const BLUE = '#2a78d6';
-const GRID = '#e1e0d9';
-const INK_MUTED = '#898781';
+const BLUE = '#3987e5';
+const GRID = '#1b2436';
+const INK_MUTED = '#5f6f8f';
 
 const baseOptions = {
   responsive: true,
